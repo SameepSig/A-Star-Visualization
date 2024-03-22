@@ -1,5 +1,6 @@
 import pygame
 import math
+import time
 from queue import PriorityQueue
 
 WIDTH = 700
@@ -17,6 +18,7 @@ PURPLE = (128, 0, 128)
 ORANGE = (255, 165 ,0)
 GREY = (128, 128, 128)
 TURQUOISE = (64, 224, 208)
+PINK = (255, 192, 203)
 
 class Node:
     def __init__(self, row, col, width, total_rows):
@@ -41,11 +43,14 @@ class Node:
     def is_barrier(self):
         return self.color == BLACK
     
+    def is_dynamic_barrier(self):
+        return self.color == YELLOW
+    
     def is_start(self):
         return self.color == ORANGE
     
     def is_end(self):
-        return self.color == TURQUOISE
+        return self.color == GREY
     
     def reset(self):
         self.color = WHITE
@@ -57,13 +62,16 @@ class Node:
         self.color = RED
 
     def make_open (self):
-        self.color = GREEN
+        self.color = PINK
 
     def make_barrier(self):
         self.color = BLACK
 
+    def make_dynamic_barrier(self):
+        self.color = YELLOW
+
     def make_end(self):
-        self.color = TURQUOISE
+        self.color = GREY
 
     def make_path(self):
         self.color = PURPLE
@@ -71,20 +79,19 @@ class Node:
     def draw(self, win):
         pygame.draw.rect(win, self.color, (self.x, self.y, self.width, self.width))
 
-    def update_neighbours(self, grid):
+    def update_neighbours(self, grid): # This will find whether the nodes can be traverse or is it (barrier/dynamic barrier)
         self.neighbors = []
-        if self.row < self.total_rows - 1 and not grid[self.row + 1][self.col].is_barrier(): # DOWN
+        if self.row < self.total_rows - 1 and not grid[self.row + 1][self.col].is_barrier() and not grid[self.row + 1][self.col].is_dynamic_barrier(): # DOWN
             self.neighbors.append(grid[self.row + 1][self.col])
 
-        if self.row > 0 and not grid[self.row - 1][self.col].is_barrier(): # UP
+        if self.row > 0 and not grid[self.row - 1][self.col].is_barrier() and not grid[self.row - 1][self.col].is_dynamic_barrier(): # UP
             self.neighbors.append(grid[self.row - 1][self.col])
 
-        if self.col < self.total_rows - 1 and not grid[self.row][self.col + 1].is_barrier(): # RIGHT
+        if self.col < self.total_rows - 1 and not grid[self.row][self.col + 1].is_barrier() and not grid[self.row][self.col + 1].is_dynamic_barrier(): # RIGHT
             self.neighbors.append(grid[self.row][self.col + 1])
 
-        if self.col > 0 and not grid[self.row][self.col - 1].is_barrier(): # LEFT
+        if self.col > 0 and not grid[self.row][self.col - 1].is_barrier() and not grid[self.row][self.col - 1].is_dynamic_barrier(): # LEFT
             self.neighbors.append(grid[self.row][self.col - 1])
-
 
     def __lt__(self, other):
         return False
@@ -101,49 +108,50 @@ def reconstruct_path(came_from, current, draw):
 		draw()
 
 def algorithm(draw, grid, start, end):
-	count = 0
-	open_set = PriorityQueue()
-	open_set.put((0, count, start))
-	came_from = {}
-	g_score = {node: float("inf") for row in grid for node in row}
-	g_score[start] = 0
-	f_score = {node: float("inf") for row in grid for node in row}
-	f_score[start] = h(start.get_pos(), end.get_pos())
+    count = 0
+    open_set = PriorityQueue()
+    open_set.put((0, count, start))
+    came_from = {}
+    g_score = {node: float("inf") for row in grid for node in row}
+    g_score[start] = 0
+    f_score = {node: float("inf") for row in grid for node in row}
+    f_score[start] = h(start.get_pos(), end.get_pos())
 
-	open_set_hash = {start}
+    open_set_hash = {start}
 
-	while not open_set.empty():
-		for event in pygame.event.get():
-			if event.type == pygame.QUIT:
-				pygame.quit()
+    while not open_set.empty():
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
 
-		current = open_set.get()[2]
-		open_set_hash.remove(current)
+        current = open_set.get()[2]
+        open_set_hash.remove(current)
+          
+        if current == end:
+            reconstruct_path(came_from, end, draw)
+            start.make_start()
+            end.make_end()
+            return True
 
-		if current == end:
-			reconstruct_path(came_from, end, draw)
-			end.make_end()
-			return True
+        for neighbor in current.neighbors:
+            temp_g_score = g_score[current] + 1
 
-		for neighbor in current.neighbors:
-			temp_g_score = g_score[current] + 1
+            if temp_g_score < g_score[neighbor]:
+                came_from[neighbor] = current
+                g_score[neighbor] = temp_g_score
+                f_score[neighbor] = temp_g_score + h(neighbor.get_pos(), end.get_pos())
+                if neighbor not in open_set_hash:
+                    count += 1
+                    open_set.put((f_score[neighbor], count, neighbor))
+                    open_set_hash.add(neighbor)
+                    neighbor.make_open()
 
-			if temp_g_score < g_score[neighbor]:
-				came_from[neighbor] = current
-				g_score[neighbor] = temp_g_score
-				f_score[neighbor] = temp_g_score + h(neighbor.get_pos(), end.get_pos())
-				if neighbor not in open_set_hash:
-					count += 1
-					open_set.put((f_score[neighbor], count, neighbor))
-					open_set_hash.add(neighbor)
-					neighbor.make_open()
+        draw()
 
-		draw()
+        if current != start:
+            current.make_closed()
 
-		if current != start:
-			current.make_closed()
-
-	return False
+    return False
 
 def make_grid(rows, width):
     grid = []
@@ -185,20 +193,26 @@ def main(win, width):
 
     start = None
     end = None
+    dynamic_barrier = None
+
+    time_dependent_barriers = {}
 
     run = True
 
     
     while run:
         draw(win, grid, ROWS, width)
+        pygame.time.delay(70)
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 run = False
 
             
             if pygame.mouse.get_pressed()[0]: # LEFT
-                pos = pygame.mouse.get_pos()  # get_pos() le mouse ko position dinxa which will be different within a same node
-                row, col = get_clicked_pos(pos, ROWS, width) # this user defined function provides mouse clicked location in a node
+                # Acts as a starting node -> ending node -> barrier node
+                pos = pygame.mouse.get_pos()  # get_pos() le mouse ko position dinxa which will be different within a same node (position with respect to whole window)
+                row, col = get_clicked_pos(pos, ROWS, width) # this user defined function provides mouse clicked location in a node (position with in a grid)
                 node = grid[row][col]
                 if not start and node != end:
                     start = node
@@ -211,7 +225,16 @@ def main(win, width):
                 elif node != end and node != start:
                     node.make_barrier()
 
+            elif pygame.mouse.get_pressed()[1]: # MIDDLE
+                # Performs time driven node removing
+                pos = pygame.mouse.get_pos()
+                row, col = get_clicked_pos(pos, ROWS, width)
+                node = grid[row][col]                
+                node.make_dynamic_barrier()
+                time_dependent_barriers[(row, col)] = time.time()
+
             elif pygame.mouse.get_pressed()[2]: # RIGHT
+                # Acts as a node remover
                 pos = pygame.mouse.get_pos()
                 row, col = get_clicked_pos(pos, ROWS, width)
                 node = grid[row][col]
@@ -234,6 +257,12 @@ def main(win, width):
                     end = None
                     grid = make_grid(ROWS, width)
 
+        # Check and remove time-dependent barriers that have exceeded the time limit
+        current_time = time.time()
+        for cell, introduction_time in list(time_dependent_barriers.items()):
+            if current_time - introduction_time >= 5:  # Check if 5 seconds have passed
+                grid[cell[0]][cell[1]].reset()
+                del time_dependent_barriers[cell]
 
     pygame.quit()
 
